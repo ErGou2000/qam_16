@@ -1,5 +1,5 @@
 function tx = cab_generate_packet(n_symbols, mcs, gi_short, seed)
-% CAB_GENERATE_PACKET  Generate an 802.11n-like OFDM WiFi packet.
+% CAB_GENERATE_PACKET  Generate an HT mixed-format 802.11n-like packet.
 %
 %   tx = cab_generate_packet(n_symbols, mcs, gi_short, seed)
 %
@@ -18,74 +18,58 @@ function tx = cab_generate_packet(n_symbols, mcs, gi_short, seed)
     if nargin < 3, gi_short = true; end
     if nargin < 4, seed = 42; end
 
-    C = cab_constants();
     rng(seed);
-
     if gi_short
-        gi_samples = C.N_GI_SHORT;
+        gi_samples = 8;
     else
-        gi_samples = C.N_GI_LONG;
+        gi_samples = 16;
     end
+
+    phy = cab_wlan_toolbox('tx_context', mcs, gi_samples);
+    gi_samples = phy.gi_samples;
+    n_fft = phy.n_fft;
+    data_fft_bins = phy.data_fft_bins;
+    pilot_fft_bins = phy.pilot_fft_bins;
+    pilot_base = phy.pilot_base;
+    pilot_polarity = phy.pilot_polarity;
+    preamble = phy.preamble;
+    preamble_len = phy.preamble_len;
+    n_data = phy.n_data;
 
     % QAM order from MCS
     qam_orders = [2, 4, 16, 64];
     qam_order = qam_orders(mcs + 1);
     bps = log2(qam_order);
 
-    %% Generate preamble
-    % L-STF: 10 short repetitions = 160 samples
-    lstf_time = ifft(C.L_STF_FREQ, C.N_FFT);
-    short_sym = lstf_time(1:16);
-    lstf = repmat(short_sym, 1, 10);  % 160 samples
-
-    % L-LTF: GI2(32) + LTF(64) + LTF(64) = 160 samples
-    lltf_time = ifft(C.L_LTF_FREQ, C.N_FFT);
-    gi2 = lltf_time(33:64);  % last 32 samples
-    lltf = [gi2, lltf_time, lltf_time];  % 160 samples
-
-    % L-SIG: one OFDM symbol with BPSK (placeholder)
-    rng_state = rng; rng(42);
-    sig_freq = zeros(1, C.N_FFT);
-    sig_data = 2*randi([0,1], 1, C.N_DATA) - 1;  % BPSK: +/-1
-    sig_freq(C.DATA_FFT_BINS) = sig_data;
-    sig_freq(C.PILOT_FFT_BINS) = C.PILOT_BASE;
-    sig_time = ifft(sig_freq, C.N_FFT);
-    sig_cp = sig_time(end-C.N_GI_LONG+1 : end);
-    lsig = [sig_cp, sig_time];  % 80 samples
-    rng(rng_state);  % restore RNG
-
-    preamble = [lstf, lltf, lsig];
-    preamble_len = length(preamble);  % 400
-
     %% Generate payload
-    total_data_bits = n_symbols * C.N_DATA * bps;
+    total_data_bits = n_symbols * n_data * bps;
     data_bits = randi([0, 1], 1, total_data_bits);
 
-    data_symbols_all = zeros(n_symbols, C.N_DATA);
-    pilot_symbols_all = zeros(n_symbols, C.N_PILOT);
+    data_symbols_all = zeros(n_symbols, n_data);
+    pilot_symbols_all = zeros(n_symbols, numel(pilot_fft_bins));
     payload = [];
 
     for k = 1:n_symbols
         % Map data bits to QAM
-        bit_start = (k-1) * C.N_DATA * bps + 1;
-        bit_end   = k * C.N_DATA * bps;
+        bit_start = (k-1) * n_data * bps + 1;
+        bit_end   = k * n_data * bps;
         sym_bits  = data_bits(bit_start:bit_end);
         data_syms = cab_modulation('qam_map', qam_order, sym_bits);
         data_symbols_all(k, :) = data_syms;
 
         % Pilot values with polarity
-        pol_idx = mod(k-1, length(C.PILOT_POLARITY)) + 1;
-        polarity = C.PILOT_POLARITY(pol_idx);
-        pilots = C.PILOT_BASE * polarity;
+        pol_idx = mod(k-1, length(pilot_polarity)) + 1;
+        polarity = pilot_polarity(pol_idx);
+        pilots = pilot_base * polarity;
         pilot_symbols_all(k, :) = pilots;
 
         % Build frequency-domain OFDM symbol
-        freq = zeros(1, C.N_FFT);
-        freq(C.DATA_FFT_BINS)  = data_syms;
-        freq(C.PILOT_FFT_BINS) = pilots;
+        freq = zeros(1, n_fft);
+        freq(data_fft_bins) = data_syms;
+        freq(pilot_fft_bins) = pilots;
 
         % IFFT and add cyclic prefix
-        time_domain = ifft(freq, C.N_FFT);
+        time_domain = ifft(freq, n_fft);
         cp = time_domain(end-gi_samples+1 : end);
         payload = [payload, cp, time_domain]; %#ok<AGROW>
     end

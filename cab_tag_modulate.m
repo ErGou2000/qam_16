@@ -20,8 +20,11 @@ function tag = cab_tag_modulate(signal, n_symbols, psk_order, preamble_samples, 
     C = cab_constants();
 
     if nargin < 3, psk_order = 4; end
-    if nargin < 4, preamble_samples = 400; end
     if nargin < 5, gi_samples = 8; end
+    if nargin < 4 || isempty(preamble_samples)
+        phy = cab_wlan_toolbox('tx_context', 0, gi_samples);
+        preamble_samples = phy.preamble_len;
+    end
     if nargin < 6, tag_bits = []; end
     if nargin < 7, freq_shift_hz = 0; end
     if nargin < 8, seed = 123; end

@@ -9,9 +9,9 @@ function C = cab_constants()
 %     PILOT_POLARITY, L_STF_FREQ, L_LTF_FREQ, SFO_THRESHOLD
 
     C.N_FFT  = 64;
-    C.N_DATA = 48;
+    C.N_DATA = 52;
     C.N_PILOT = 4;
-    C.N_USED = 52;
+    C.N_USED = 56;
     C.SAMPLING_RATE = 20e6;
     C.T_FFT = C.N_FFT / C.SAMPLING_RATE;  % 3.2 us
     C.N_GI_SHORT = 8;   % 0.4 us
@@ -21,14 +21,14 @@ function C = cab_constants()
     C.PILOT_SC_IDX  = [-21, -7, 7, 21];
     C.PILOT_BASE    = [1, 1, 1, -1];
 
-    % Data subcarrier indices (48 subcarriers, excluding pilots/DC/guard)
-    all_used = [-26:-1, 1:26];  % 52 values, no DC
+    % HT 20 MHz data subcarriers (52 data + 4 pilots, excluding DC)
+    all_used = [-28:-1, 1:28];  % 56 occupied subcarriers, no DC
     pilot_set = C.PILOT_SC_IDX;
     mask = true(1, length(all_used));
     for p = pilot_set
         mask = mask & (all_used ~= p);
     end
-    C.DATA_SC_IDX = all_used(mask);  % 48 data subcarrier indices
+    C.DATA_SC_IDX = all_used(mask);  % 52 data subcarrier indices
 
     % Convert subcarrier indices to 1-based FFT bin indices
     % sc_to_bin: centered index k -> MATLAB FFT bin = mod(k, N_FFT) + 1

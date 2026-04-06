@@ -88,44 +88,25 @@ ch = cab_channel(tag_result.signal, 25, 200, 2.0, true, 4, 77);
 rx_signal = ch.signal;
 
 C = cab_constants();
-
-% --- WiFi front-end ---
-% Coarse CFO
-lstf = rx_signal(1:160);
-corr_c = sum(lstf(17:160) .* conj(lstf(1:144)));
-cfo_c  = angle(corr_c) / (2*pi*16/C.SAMPLING_RATE);
-rx = rx_signal .* exp(-1i * 2*pi*cfo_c*(0:length(rx_signal)-1)/C.SAMPLING_RATE);
-
-% Fine CFO
-ltf1s = 160+32+1;
-ltf1 = rx(ltf1s:ltf1s+63);
-ltf2 = rx(ltf1s+64:ltf1s+127);
-corr_f = sum(ltf2 .* conj(ltf1));
-cfo_f  = angle(corr_f) / (2*pi*64/C.SAMPLING_RATE);
-rx = rx .* exp(-1i * 2*pi*cfo_f*(0:length(rx)-1)/C.SAMPLING_RATE);
-
-% Channel estimate
-ltf1_time = rx(ltf1s:ltf1s+63);
-ltf2_time = rx(ltf1s+64:ltf1s+127);
-H = zeros(1, C.N_FFT);
-L1F = fft(ltf1_time, C.N_FFT);
-L2F = fft(ltf2_time, C.N_FFT);
-for b = 1:C.N_FFT
-    if C.L_LTF_FREQ(b) ~= 0
-        H(b) = 0.5*(L1F(b)+L2F(b)) / C.L_LTF_FREQ(b);
-    end
-end
+front = cab_wlan_toolbox('rx_frontend', rx_signal, mcs, tx.gi_samples);
+rx = front.rx_corrected;
+H = front.channel_est_full;
+pilot_fft_bins = front.pilot_fft_bins;
+pilot_sc_idx = front.pilot_sc_idx;
+pilot_base = front.pilot_base;
+pilot_polarity = front.pilot_polarity;
+n_fft = front.n_fft;
 
 % Extract symbols
 gi_samp = tx.gi_samples;
-sym_len = gi_samp + C.N_FFT;
-freq_sym = zeros(n_symbols, C.N_FFT);
+sym_len = gi_samp + n_fft;
+freq_sym = zeros(n_symbols, n_fft);
 for k = 1:n_symbols
     ds = tx.preamble_len + (k-1)*sym_len + gi_samp + 1;
-    de = ds + C.N_FFT - 1;
+    de = ds + n_fft - 1;
     if de > length(rx), break; end
-    f = fft(rx(ds:de), C.N_FFT);
-    for b = 1:C.N_FFT
+    f = fft(rx(ds:de), n_fft);
+    for b = 1:n_fft
         if abs(H(b)) > 1e-10
             f(b) = f(b) / H(b);
         else
@@ -136,16 +117,16 @@ for k = 1:n_symbols
 end
 
 % Remove pilot modulation
-pilot_cor = zeros(n_symbols, C.N_PILOT);
+pilot_cor = zeros(n_symbols, numel(pilot_fft_bins));
 for k = 1:n_symbols
-    pol_idx = mod(k-1, length(C.PILOT_POLARITY)) + 1;
-    pol = C.PILOT_POLARITY(pol_idx);
-    known = C.PILOT_BASE * pol;
-    pilot_cor(k,:) = freq_sym(k, C.PILOT_FFT_BINS) ./ known;
+    pol_idx = mod(k-1, length(pilot_polarity)) + 1;
+    pol = pilot_polarity(pol_idx);
+    known = pilot_base * pol;
+    pilot_cor(k,:) = freq_sym(k, pilot_fft_bins) ./ known;
 end
 
 % Helper: estimate phase with unwrapping
-est_phase = @(pc, method) local_est_phase(pc, method, C);
+est_phase = @(pc, method) local_est_phase(pc, method, pilot_sc_idx);
 
 % (a) Simple averaging
 beta0_mean = est_phase(pilot_cor, 'mean');
@@ -199,10 +180,10 @@ function ber = compute_ber(tx_bits, rx_bits)
     ber = sum(tx_bits(1:n) ~= rx_bits(1:n)) / n;
 end
 
-function beta0 = local_est_phase(pilot_cor, method, C)
+function beta0 = local_est_phase(pilot_cor, method, pilot_sc_idx)
 % Estimate zero-subcarrier phase.
     n_sym = size(pilot_cor, 1);
-    x = double(C.PILOT_SC_IDX(:));
+    x = double(pilot_sc_idx(:));
     beta0 = zeros(1, n_sym);
     for k = 1:n_sym
         A   = abs(pilot_cor(k,:))';

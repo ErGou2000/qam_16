@@ -31,20 +31,17 @@ function ch = cab_channel(signal, snr_db, cfo_hz, sfo_ppm, multipath_en, n_taps,
 
     %% Multipath
     if multipath_en
-        T_s = 1 / C.SAMPLING_RATE;
-        rms_delay = 50e-9;  % 50 ns typical indoor
-        delays = (0:n_taps-1) * T_s;
-        power_profile = exp(-delays / rms_delay);
-        power_profile = power_profile / sum(power_profile);
-
-        % Rayleigh fading taps
-        taps = (randn(1, n_taps) + 1i * randn(1, n_taps)) / sqrt(2);
-        taps = taps .* sqrt(power_profile);
-        channel_taps = taps;
-
-        % Convolution, keep same length
-        out_conv = conv(out, taps);
-        out = out_conv(1:length(signal));
+        delay_profiles = {'Model-A', 'Model-B', 'Model-C', 'Model-D', 'Model-E', 'Model-F'};
+        profile_idx = min(max(round(n_taps), 1), numel(delay_profiles));
+        tgn = wlanTGnChannel( ...
+            'SampleRate', C.SAMPLING_RATE, ...
+            'DelayProfile', delay_profiles{profile_idx}, ...
+            'LargeScaleFadingEffect', 'None', ...
+            'NormalizeChannelOutputs', true, ...
+            'RandomStream', 'mt19937ar with seed', ...
+            'Seed', seed);
+        out = tgn(out(:));
+        out = reshape(out, 1, []);
     end
 
     %% CFO

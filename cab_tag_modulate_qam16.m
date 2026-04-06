@@ -24,8 +24,11 @@ function tag = cab_tag_modulate_qam16(signal, n_symbols, preamble_samples, ...
 
     C = cab_constants();
 
-    if nargin < 3, preamble_samples = 400; end
     if nargin < 4, gi_samples = 8; end
+    if nargin < 3 || isempty(preamble_samples)
+        phy = cab_wlan_toolbox('tx_context', 0, gi_samples);
+        preamble_samples = phy.preamble_len;
+    end
     if nargin < 5, tag_bits = []; end
     if nargin < 6, freq_shift_hz = 0; end
     if nargin < 7, seed = 123; end
